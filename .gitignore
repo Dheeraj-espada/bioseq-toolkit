@@ -1,0 +1,23 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*.so
+
+# virtualenv / conda env
+env/
+venv/
+*.egg-info/
+
+# Data / outputs
+*.csv
+*.fa
+*.fasta
+*.fa.gz
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/

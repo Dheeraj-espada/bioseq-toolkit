@@ -1,0 +1,13 @@
+name: bioinfo
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - biopython
+  - pandas
+  - pytest
+  - matplotlib
+  - numpy
+  - pip
+  - pip:
+      # add any pip-only packages here
