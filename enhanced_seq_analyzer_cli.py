@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 """
 enhanced_seq_analyzer_cli.py
-Enhanced FASTA analyzer with ORF finder, partial-ORF support, and option to write ORF FASTA files.
-
-Features:
- - --orf: find longest ORF (ATG..stop) across frames
- - --both-strands: also search reverse complement
- - --min-orf-aa: minimum ORF aa length to include
- - --allow-partial: accept ATG..end as ORF if no in-frame stop found
- - --write-orf-fasta: write nucleotide and amino-acid FASTA for found ORFs (prefix from out_csv)
- - --min-length / --min-prot-len filters
- - Legacy translate behavior (no --orf): trim to multiple of 3 and translate to first stop
+Enhanced FASTA analyzer with ORF finder, partial-ORF support, ORF FASTA output,
+and optional plotting integration (calls plot_fasta_stats.py).
 """
 import argparse
 import csv
 import logging
+import subprocess
+import sys
 from pathlib import Path
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -191,7 +185,7 @@ def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_p
     }
 
 def main():
-    parser = argparse.ArgumentParser(description="Enhanced FASTA analyzer with ORF finder and ORF FASTA output")
+    parser = argparse.ArgumentParser(description="Enhanced FASTA analyzer with ORF finder and optional plotting")
     parser.add_argument("in_fasta", type=Path, help="Input FASTA file")
     parser.add_argument("-o", "--out_csv", type=Path, default=Path("enhanced_summary.csv"), help="Output CSV file")
     parser.add_argument("--orf", action="store_true", help="Find longest ORF (ATG..stop) across frames")
@@ -199,6 +193,7 @@ def main():
     parser.add_argument("--min-orf-aa", type=int, default=0, help="Minimum ORF length in amino acids (default 0)")
     parser.add_argument("--allow-partial", action="store_true", help="Allow ATG..end as partial ORF if no in-frame stop")
     parser.add_argument("--write-orf-fasta", action="store_true", help="Write nucleotide and amino-acid FASTA for found ORFs (prefix from out_csv)")
+    parser.add_argument("--plot-stats", action="store_true", help="Generate GC% and protein-length plots from CSV after analysis")
     parser.add_argument("--to-stop", action="store_true", help="(Legacy) translate to first stop (used when --orf not set)")
     parser.add_argument("--codon-table", type=int, default=1, help="Codon table number (default 1)")
     parser.add_argument("--min-length", type=int, default=0, help="Minimum nucleotide length to include (default 0)")
@@ -284,7 +279,6 @@ def main():
                     frame = res["orf_frame"]
                     partial = res["orf_partial"]
                     aa_len = res["prot_len"]
-                    # nucleotide slice (1-based inclusive -> python slice start-1:end)
                     nuc = seq_obj[start-1:end]
                     if strand == "-":
                         nuc = nuc.reverse_complement()
@@ -296,6 +290,23 @@ def main():
                     orf_aa_fh.write(f">{header_base}\n{aa}\n")
 
     logging.info(f"Processed {total} records. Written: {written}. Skipped (length): {skipped_length}. Skipped (prot_len): {skipped_prot}. Output CSV: {args.out_csv}")
+
+    # optionally generate plots by calling the plotting script using same Python interpreter
+    if args.plot_stats:
+        try:
+            outdir = args.out_csv.with_suffix("").stem + "_plots"
+            cmd = [
+                sys.executable,
+                str(Path(__file__).parent / "plot_fasta_stats.py"),
+                str(args.out_csv),
+                "--out-dir",
+                outdir
+            ]
+            logging.info("Generating plots: " + " ".join(cmd))
+            subprocess.run(cmd, check=True)
+            logging.info(f"Plots generated in {outdir}")
+        except Exception as e:
+            logging.warning(f"Failed to generate plots: {e}")
 
     if orf_nuc_fh:
         orf_nuc_fh.close()
