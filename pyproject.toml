@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bioseq-toolkit"
+version = "0.1.0"
+description = "BioSeq toolkit — sequence analysis utilities"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+  { name = "Dheeraj", email = "you@example.com" }
+]
+
+[project.scripts]
+bioseq-analyze = "bioseq.analyzer:main"
