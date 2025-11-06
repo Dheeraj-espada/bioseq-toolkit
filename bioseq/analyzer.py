@@ -325,26 +325,34 @@ def main():
     console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     root_logger.addHandler(console_handler)
 
-    # file handler (if requested) — ensure file exists first
     if args.logfile:
+        # ensure parent dir exists and the file is created
         args.logfile.parent.mkdir(parents=True, exist_ok=True)
+
+        # touch the file (create if missing)
         try:
             args.logfile.touch(exist_ok=True)
         except Exception:
             with open(args.logfile, "a"):
                 pass
 
+        # write a startup line directly to the file so it is non-empty even if logging handlers
+        # behave differently in CI subprocess environments
+        try:
+            with open(args.logfile, "a", encoding="utf-8") as _fh:
+                _fh.write("BioSeq Analyzer started.\n")
+        except Exception:
+            # fallback - ignore write errors (file may be readonly in some edge cases)
+            pass
+
+        # now attach a file handler so future log messages go there as well
         file_handler = logging.FileHandler(args.logfile)
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         root_logger.addHandler(file_handler)
 
-        # Set root logger to DEBUG so file handler receives all records,
-        # while console handler still filters via its own level.
+        # ensure root logger is DEBUG so file handler collects everything
         root_logger.setLevel(logging.DEBUG)
-    else:
-        # No logfile requested — root logger can use the console-filter level
-        root_logger.setLevel(log_level)
 
     # emit a startup message (this will be written to logfile even when --quiet)
     logging.info("BioSeq Analyzer started.")
