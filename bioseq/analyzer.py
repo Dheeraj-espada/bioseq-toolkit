@@ -24,7 +24,7 @@ from Bio.SeqUtils.ProtParam import ProteinAnalysis
 
 # relative import of visualizer module
 from . import visualizer as _visualizer
-
+from . import __version__
 # constants
 STOPS = {"TAA", "TAG", "TGA"}
 START = "ATG"
@@ -320,6 +320,7 @@ def generate_plots_from_csv(csv_path, out_dir=None):
 # ---------------------------
 def main():
     parser = argparse.ArgumentParser(description="Enhanced FASTA analyzer with ORF finder and optional plotting")
+    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("in_fasta", type=Path, help="Input FASTA file")
     parser.add_argument("-o", "--out_csv", type=Path, default=Path("enhanced_summary.csv"), help="Output CSV file")
     parser.add_argument("--orf", action="store_true", help="Find longest ORF (ATG..stop) across frames")
