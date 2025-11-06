@@ -2,13 +2,13 @@
 """
 bioseq/analyzer.py
 Enhanced FASTA analyzer with ORF finder, partial-ORF support, ORF FASTA output,
-and optional plotting integration (now uses bioseq.visualizer in-process).
+and optional plotting integration (uses bioseq.visualizer in-process).
 
-This file was refactored to:
-- introduce SequenceRecord dataclass (OOP)
-- add find_orfs() and longest_orf() methods on SequenceRecord
-- keep backward-compatible wrapper functions for existing CLI/tests
-- integrate plotting with bioseq.visualizer via generate_plots_from_csv()
+Notes:
+- Avoids importing __version__ at module import time to prevent circular imports
+  when this module is executed with `python -m bioseq.analyzer`.
+- Lazy-imports __version__ inside main().
+- Ensures logfile is touched and emits a startup log message so tests can detect it.
 """
 import argparse
 import csv
@@ -22,9 +22,9 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 
-# relative import of visualizer module
+# relative import of visualizer module (safe at import time)
 from . import visualizer as _visualizer
-from . import __version__
+
 # constants
 STOPS = {"TAA", "TAG", "TGA"}
 START = "ATG"
@@ -37,25 +37,22 @@ START = "ATG"
 class SequenceRecord:
     """
     Lightweight wrapper around a nucleotide sequence.
-    Stores a Bio.Seq.Seq object in self.seq and provides common methods:
+    Stores a Bio.Seq.Seq object in self.seq and provides methods:
     length, gc_content, reverse_complement, translate, find_orfs, longest_orf.
     """
     id: str
-    seq: str  # input can be string or Seq-like; will be normalized to Bio.Seq.Seq
+    seq: str  # will be normalized to Bio.Seq.Seq in __post_init__
 
     def __post_init__(self):
-        # Normalize: remove newlines, uppercase, create Seq object
         seq_str = str(self.seq).replace("\n", "").upper()
         if not seq_str:
             raise ValueError("Empty sequence provided")
         self.seq: Seq = Seq(seq_str)
 
     def length(self) -> int:
-        """Return sequence length (nt)."""
         return len(self.seq)
 
     def gc_content(self) -> float:
-        """Return GC percentage (0-100). Uses simple counting (fast)."""
         n = self.length()
         if n == 0:
             return 0.0
@@ -64,21 +61,14 @@ class SequenceRecord:
         return (g + c) / n * 100
 
     def reverse_complement(self) -> Seq:
-        """Return reverse complement as a Seq object."""
         return self.seq.reverse_complement()
 
     def translate(self, to_stop: bool = True, table: int = 1) -> str:
-        """
-        Translate nucleotide seq to amino acids.
-        to_stop=True will stop at first stop; table chooses codon table.
-        Trim trailing partial codon to avoid warnings.
-        """
         trimmed_len = (len(self.seq) // 3) * 3
         trimmed_seq = self.seq[:trimmed_len]
         return str(trimmed_seq.translate(to_stop=to_stop, table=table))
 
     def to_summary_dict(self) -> Dict[str, object]:
-        """Return a small dict summary helpful for DataFrame/CSV output."""
         return {
             "id": self.id,
             "length": self.length(),
@@ -87,11 +77,6 @@ class SequenceRecord:
         }
 
     def find_orfs(self, allow_partial: bool = False) -> List[Dict]:
-        """
-        Scan this sequence for ORFs that start with ATG and end with a stop codon.
-        Returns a list of ORF dicts with keys:
-          frame (0-2), start_nt (0-based), end_nt (end exclusive, 0-based), aa_len, prot_seq, partial (bool)
-        """
         seq_str = str(self.seq)
         n = len(seq_str)
         orfs: List[Dict] = []
@@ -106,7 +91,7 @@ class SequenceRecord:
                         stop = seq_str[j:j+3]
                         if stop in STOPS:
                             orf_nt_start = i
-                            orf_nt_end = j + 3  # end exclusive index
+                            orf_nt_end = j + 3
                             prot = Seq(seq_str[orf_nt_start:orf_nt_end]).translate(to_stop=True)
                             orfs.append({
                                 "frame": frame,
@@ -139,13 +124,9 @@ class SequenceRecord:
         return orfs
 
     def longest_orf(self, both_strands: bool = False, allow_partial: bool = False) -> Optional[Dict]:
-        """
-        Return the single longest ORF (optionally searching both strands).
-        Returns a dict with mapped 1-based coordinates for start/end and strand.
-        """
         candidates: List[Dict] = []
         n = len(self.seq)
-        # forward strand candidates
+        # forward strand
         for orf in self.find_orfs(allow_partial=allow_partial):
             candidates.append({
                 "strand": "+",
@@ -156,15 +137,13 @@ class SequenceRecord:
                 "prot_seq": orf["prot_seq"],
                 "partial": orf.get("partial", False)
             })
-
-        # reverse strand candidates (map coordinates back to original)
+        # reverse strand
         if both_strands:
             rc = self.reverse_complement()
             rc_rec = SequenceRecord(id=f"{self.id}_rc", seq=str(rc))
             for orf in rc_rec.find_orfs(allow_partial=allow_partial):
                 rc_start = orf["start_nt"]
                 rc_end_excl = orf["end_nt"]
-                # mapping rc coords back to original (1-based)
                 orig_start_1 = n - (rc_end_excl - 1)
                 orig_end_1 = n - rc_start
                 candidates.append({
@@ -176,38 +155,28 @@ class SequenceRecord:
                     "prot_seq": orf["prot_seq"],
                     "partial": orf.get("partial", False)
                 })
-
         if not candidates:
             return None
-
-        # choose longest by aa length, break ties by nucleotide span
         candidates.sort(key=lambda x: (x["aa_len"], x["end_nt_1based"] - x["start_nt_1based"]), reverse=True)
-        best = candidates[0]
-        return best
+        return candidates[0]
 
 
 # ---------------------------
-# Backwards-compatible wrapper functions
+# Backwards-compatible wrappers
 # ---------------------------
 def find_orfs_in_seq(seq, allow_partial=False):
-    """Wrapper: keep original function signature but use SequenceRecord implementation."""
     return SequenceRecord(id="tmp", seq=str(seq)).find_orfs(allow_partial=allow_partial)
 
 
 def find_longest_orf(seq, both_strands=False, allow_partial=False):
-    """Wrapper: keep original signature but use SequenceRecord.longest_orf."""
     return SequenceRecord(id="tmp", seq=str(seq)).longest_orf(both_strands=both_strands, allow_partial=allow_partial)
 
 
 # ---------------------------
-# analyze_record now uses SequenceRecord internally
+# analyze_record uses SequenceRecord
 # ---------------------------
 def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_partial=False, codon_table=1):
-    """
-    Accepts a Biopython SeqRecord and returns the summary dict.
-    """
     seq_rec = SequenceRecord(id=rec.id, seq=str(rec.seq))
-
     seq_len = seq_rec.length()
     gc = seq_rec.gc_content()
 
@@ -233,7 +202,6 @@ def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_p
         else:
             orf_info = None
     else:
-        # translate trimmed sequence (no ORF detection)
         try:
             prot = Seq(str(seq_rec.seq)[: (seq_len // 3) * 3]).translate(to_stop=True, table=codon_table)
             prot_seq = str(prot)
@@ -294,10 +262,6 @@ def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_p
 # Plot generation helper (integrated visualizer)
 # ---------------------------
 def generate_plots_from_csv(csv_path, out_dir=None):
-    """
-    Read CSV produced by analyzer and generate standard plots (length histogram, GC boxplot).
-    Returns a dict with paths of generated files.
-    """
     csv_path = Path(csv_path)
     if out_dir is None:
         out_dir = csv_path.with_suffix("").stem + "_plots"
@@ -316,9 +280,12 @@ def generate_plots_from_csv(csv_path, out_dir=None):
 
 
 # ---------------------------
-# CLI (kept unchanged except plotting integration)
+# CLI
 # ---------------------------
 def main():
+    # lazy import of __version__ avoids circular import when invoked with -m
+    from bioseq import __version__
+
     parser = argparse.ArgumentParser(description="Enhanced FASTA analyzer with ORF finder and optional plotting")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("in_fasta", type=Path, help="Input FASTA file")
@@ -334,30 +301,54 @@ def main():
     parser.add_argument("--min-length", type=int, default=0, help="Minimum nucleotide length to include (default 0)")
     parser.add_argument("--min-prot-len", type=int, default=0, help="Minimum protein length (aa) to include (default 0, used when --orf not set)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+
+    # add missing CLI options here (before parse_args)
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress info output (only warnings/errors).")
+    parser.add_argument("--logfile", type=Path, help="Optional path to write full log output (in addition to console).")
+
     args = parser.parse_args()
 
-    log_level = logging.DEBUG if args.verbose else (
-        logging.WARNING if args.quiet else logging.INFO
-    )
-    logging.basicConfig(
-        level=log_level,
-        format="%(levelname)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)]
-    )
+    # configure logging (works with --verbose, --quiet, and --logfile)
+    # configure logging so:
+    # - console (stdout) shows INFO/DEBUG/WARNING per args.verbose/args.quiet
+    # - logfile (if requested) always receives DEBUG and above
+    log_level = logging.DEBUG if args.verbose else (logging.WARNING if args.quiet else logging.INFO)
 
-# Optional logfile handler
+    root_logger = logging.getLogger()
+    # remove any existing handlers to avoid duplicate logs in repeated runs
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    # console handler (respects user-specified verbosity)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    root_logger.addHandler(console_handler)
+
+    # file handler (if requested) — ensure file exists first
     if args.logfile:
-        fh = logging.FileHandler(args.logfile)
-        fh.setLevel(logging.DEBUG)
-    	fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    	logging.getLogger().addHandler(fh)
+        args.logfile.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            args.logfile.touch(exist_ok=True)
+        except Exception:
+            with open(args.logfile, "a"):
+                pass
 
-# Keep this check right after logging is configured
-    if not args.in_fasta.exists():
-    	logging.error(f"Input FASTA {args.in_fasta} not found.")
-    	raise SystemExit(1)
+        file_handler = logging.FileHandler(args.logfile)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        root_logger.addHandler(file_handler)
 
-    # If writing ORF FASTA, load entire FASTA into memory (id -> SeqRecord)
+        # Set root logger to DEBUG so file handler receives all records,
+        # while console handler still filters via its own level.
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        # No logfile requested — root logger can use the console-filter level
+        root_logger.setLevel(log_level)
+
+    # emit a startup message (this will be written to logfile even when --quiet)
+    logging.info("BioSeq Analyzer started.")
+
     seq_map = None
     orf_nuc_fh = None
     orf_aa_fh = None
@@ -372,7 +363,6 @@ def main():
         logging.info(f"ORF nucleotide FASTA will be written to: {orf_nuc_path}")
         logging.info(f"ORF amino-acid FASTA will be written to: {orf_aa_path}")
 
-    # Main streaming parse for analysis & CSV writing
     records = SeqIO.parse(str(args.in_fasta), "fasta")
     written = 0
     skipped_length = 0
@@ -392,13 +382,11 @@ def main():
                                  min_orf_aa=args.min_orf_aa, allow_partial=args.allow_partial,
                                  codon_table=args.codon_table)
 
-            # nucleotide-length filter
             if res["length"] < args.min_length:
                 skipped_length += 1
                 logging.debug(f"Skipping {res['id']} (len {res['length']} < min-length {args.min_length})")
                 continue
 
-            # protein-length filter
             if args.orf:
                 prot_len_field = res["prot_len"]
                 if prot_len_field == 0 or prot_len_field < args.min_orf_aa:
@@ -411,11 +399,9 @@ def main():
                     logging.debug(f"Skipping {res['id']} (prot_len {res['prot_len']} < min-prot-len {args.min_prot_len})")
                     continue
 
-            # write CSV row
             writer.writerow(res)
             written += 1
 
-            # write ORF FASTAs if requested
             if args.write_orf_fasta and res.get("orf_start") and res.get("orf_end"):
                 sid = res["id"]
                 seq_obj = seq_map.get(sid)
@@ -440,7 +426,6 @@ def main():
 
     logging.info(f"Processed {total} records. Written: {written}. Skipped (length): {skipped_length}. Skipped (prot_len): {skipped_prot}. Output CSV: {args.out_csv}")
 
-    # integrated plotting using visualizer
     if args.plot_stats:
         try:
             outdir = args.out_csv.with_suffix("").stem + "_plots"
@@ -458,3 +443,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
