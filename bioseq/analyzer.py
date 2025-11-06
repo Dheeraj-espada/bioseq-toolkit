@@ -336,12 +336,26 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(levelname)s: %(message)s")
+    log_level = logging.DEBUG if args.verbose else (
+        logging.WARNING if args.quiet else logging.INFO
+    )
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
 
+# Optional logfile handler
+    if args.logfile:
+        fh = logging.FileHandler(args.logfile)
+        fh.setLevel(logging.DEBUG)
+    	fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    	logging.getLogger().addHandler(fh)
+
+# Keep this check right after logging is configured
     if not args.in_fasta.exists():
-        logging.error(f"Input FASTA {args.in_fasta} not found.")
-        raise SystemExit(1)
+    	logging.error(f"Input FASTA {args.in_fasta} not found.")
+    	raise SystemExit(1)
 
     # If writing ORF FASTA, load entire FASTA into memory (id -> SeqRecord)
     seq_map = None
