@@ -1,48 +1,85 @@
-# tests/test_orf_finder.py
-import io
+"""
+tests/test_orf_finder.py
+Unit tests for ORF-finding and analysis functions.
+
+Covers:
+- SequenceRecord.find_orfs()
+- SequenceRecord.longest_orf()
+- Wrapper functions find_orfs_in_seq() / find_longest_orf()
+- analyze_record() integration
+"""
+
 from Bio.Seq import Seq
-import enhanced_seq_analyzer_cli as ea
+from Bio.SeqRecord import SeqRecord
+from bioseq import analyzer as ea
+
 
 def test_find_orfs_simple():
-    seq = Seq("AAATGAAATTTTAA")  # ATG...TAA -> one ORF
+    """Basic ORF: ATG...TAA in the forward strand"""
+    seq = Seq("AAATGAAATTTTAA")  # ORF starts at index 2, ends at 13 (TAA)
     orfs = ea.find_orfs_in_seq(seq, allow_partial=False)
+
+    # one clear ORF should be found
     assert len(orfs) == 1
     orf = orfs[0]
-    assert orf["frame"] == 2  # ATG starts at index 2 (0-based)
-    assert orf["aa_len"] == 3  # translated aa length
-    assert orf["prot_seq"].startswith("MKF") or orf["prot_seq"]  # common check
 
-def test_find_orfs_allow_partial():
-    seq = Seq("CCCATGAAAAAA")  # ATG but no stop -> partial allowed
+    # Check frame and expected protein length
+    assert orf["frame"] == 2  # ATG starts at index 2 (frame 2)
+    assert orf["aa_len"] == 3  # 9 nt -> 3 amino acids
+    assert orf["prot_seq"] == "MKF"  # translated protein sequence
+
+
+def test_find_orfs_partial():
+    """If allow_partial=True, detect ORF with no stop codon at the end"""
+    seq = Seq("CCCATGAAAAAA")  # ATG at index 3, no stop codon
     orfs_no = ea.find_orfs_in_seq(seq, allow_partial=False)
-    assert len(orfs_no) == 0
     orfs_yes = ea.find_orfs_in_seq(seq, allow_partial=True)
-    assert len(orfs_yes) >= 1
-    partial = orfs_yes[0]
-    assert partial["partial"] is True
-    assert partial["aa_len"] >= 1
 
-def test_find_longest_orf_both_strands():
-    # forward ORF
-    seq_fwd = Seq("AAATGAAATTTTAA")
-    best = ea.find_longest_orf(seq_fwd, both_strands=False, allow_partial=False)
-    assert best is not None
-    assert best["strand"] == "+"
-    assert best["aa_len"] == 3
+    # Without partial -> no ORF
+    assert len(orfs_no) == 0
+    # With partial -> one ORF
+    assert len(orfs_yes) == 1
 
-    # reverse ORF: design sequence whose reverse complement has an ATG..stop
-    forward_orf = Seq("AAATGAAATTTTAA")            # contains ATG...TAA
-    seq_rev = forward_orf.reverse_complement()     # reverse complement will contain that ORF
-    best_rev = ea.find_longest_orf(seq_rev, both_strands=True, allow_partial=False)
-    assert best_rev is not None
-    assert best_rev["strand"] in ("+","-")
+    orf = orfs_yes[0]
+    assert orf["partial"] is True
+    assert orf["aa_len"] >= 1
 
-def test_analyze_record_translation_and_fields():
-    # Build a mock record using Bio.SeqIO style object -> use SeqIO to create a record
-    from Bio.SeqRecord import SeqRecord
-    rec = SeqRecord(Seq("AAATGAAATTTTAA"), id="test1", description="test1")
+
+def test_longest_orf_forward_and_reverse():
+    """Find longest ORF on both strands."""
+    seq = Seq("AAATGAAATTTTAA")
+    longest = ea.find_longest_orf(seq, both_strands=False, allow_partial=False)
+    assert longest is not None
+    assert longest["strand"] == "+"
+    assert longest["aa_len"] == 3
+
+    # Reverse complement should also yield a valid ORF when both_strands=True
+    longest_both = ea.find_longest_orf(seq, both_strands=True, allow_partial=False)
+    assert longest_both is not None
+    assert longest_both["strand"] in {"+", "-"}
+
+
+def test_sequence_record_methods():
+    """Directly test SequenceRecord methods for ORFs."""
+    rec = ea.SequenceRecord(id="s1", seq="AAATGAAATTTTAA")
+    orfs = rec.find_orfs()
+    assert len(orfs) == 1
+    longest = rec.longest_orf()
+    assert longest["aa_len"] == 3
+    assert longest["strand"] == "+"
+
+
+def test_analyze_record_integration():
+    """Integration test: analyze_record should use SequenceRecord under the hood."""
+    rec = SeqRecord(Seq("AAATGAAATTTTAA"), id="test1", description="example record")
     res = ea.analyze_record(rec, use_orf=True, both_strands=False, min_orf_aa=0, allow_partial=False)
-    # should find ORF
-    assert res["orf_start"] != ""
-    assert res["prot_len"] == 3
+
+    # check key fields
+    assert res["id"] == "test1"
     assert res["orf_strand"] == "+"
+    assert res["prot_len"] == 3
+    assert res["orf_start"] != ""
+    assert res["gc_percent"] > 0
+    assert "rev_comp_first50" in res
+
+
