@@ -28,3 +28,4 @@ results/
 .pytest_cache/
 
 data/*.fna
+*~
