@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export MPLBACKEND=Agg
 # scripts/run_analysis.sh — robust batch runner for bioseq.analyzer
 set -euo pipefail
 
