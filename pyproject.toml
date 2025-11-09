@@ -1,16 +1,19 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "bioseq-toolkit"
 version = "0.1.0"
-description = "BioSeq toolkit — sequence analysis utilities"
-readme = "README.md"
-requires-python = ">=3.8"
+description = "Enhanced Sequence Analyzer (FASTA/ORF/protein analysis)"
 authors = [
-  { name = "Dheeraj", email = "you@example.com" }
+  { name="Dheeraj Babu" }
 ]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
 
-[project.scripts]
-bioseq-analyze = "bioseq.analyzer:main"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bioseq*"]
+
