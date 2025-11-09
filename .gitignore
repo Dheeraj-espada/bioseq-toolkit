@@ -27,3 +27,4 @@ results/
 *.svg
 .pytest_cache/
 
+data/*.fna
