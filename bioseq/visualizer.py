@@ -13,6 +13,8 @@ Design choices:
 from typing import List, Dict, Union
 from pathlib import Path
 import csv
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
