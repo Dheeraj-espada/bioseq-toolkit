@@ -21,3 +21,9 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
+results/
+*.log
+*.png
+*.svg
+.pytest_cache/
+
