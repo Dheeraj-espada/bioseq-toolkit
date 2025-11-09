@@ -29,3 +29,8 @@ results/
 
 data/*.fna
 *~
+
+# ignore large reference FASTA files
+data/*.fna
+*.fna
+GCF_*.fna
