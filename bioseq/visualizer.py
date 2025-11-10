@@ -34,10 +34,54 @@ def _ensure_plot_dir(base_output: Optional[str] = None, subdir: str = "example_s
 
 def save_plot(fig, filename: str, base_output: Optional[str] = None):
     """
-    Save a matplotlib figure into the controlled plots directory.
-    Returns the full path to the saved file.
+    Save a matplotlib figure.
+    Behavior:
+      * absolute path -> save exactly there
+      * relative path with no dir (e.g. 'len.png') -> save under _ensure_plot_dir(...)
+      * relative path with dir component (e.g. 'example_summary_plots/len.png'):
+          - if the first path component already looks like the base (results or BIOSEQ_OUTPUT_DIR),
+            treat it as relative-to-repo and save (preserves previous behavior)
+          - otherwise, place it under the controlled plots dir produced by _ensure_plot_dir(...)
+    Returns the full path to saved file.
     """
     import os
+    # Absolute path -> save there
+    if os.path.isabs(filename):
+        full = os.path.abspath(filename)
+        parent = os.path.dirname(full)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fig.savefig(full, bbox_inches="tight")
+        return full
+
+    # If filename contains a directory component
+    if os.path.sep in filename:
+        # first path component
+        first = filename.split(os.path.sep, 1)[0]
+        # derive canonical base name (if BIOSEQ_OUTPUT_DIR set, use its basename)
+        base_output_env = os.environ.get("BIOSEQ_OUTPUT_DIR")
+        base_names = {"results"}
+        if base_output_env:
+            base_names.add(os.path.basename(base_output_env.rstrip(os.path.sep)))
+        # If the user already passed something beginning with the base (e.g. 'results/...'),
+        # treat it as a repo-relative path and save exactly where it resolves to.
+        if first in base_names:
+            full = os.path.abspath(filename)
+            parent = os.path.dirname(full)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            fig.savefig(full, bbox_inches="tight")
+            return full
+        # Otherwise, interpret the path as relative to the controlled plots dir
+        out_dir = _ensure_plot_dir(base_output)
+        path = os.path.join(out_dir, filename)
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fig.savefig(path, bbox_inches="tight")
+        return path
+
+    # No directory component -> normal controlled plots dir
     out_dir = _ensure_plot_dir(base_output)
     path = os.path.join(out_dir, filename)
     fig.savefig(path, bbox_inches="tight")
@@ -88,7 +132,7 @@ def plot_length_histogram(records: List[Dict], out_path: Union[str, Path], bins:
         # create an empty figure to keep behavior deterministic for tests
         fig = plt.figure()
         fig.suptitle("No length data")
-        out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
+        out_path = save_plot(fig, str(out_path))
         plt.close(fig)
         return out_path
 
@@ -99,7 +143,7 @@ def plot_length_histogram(records: List[Dict], out_path: Union[str, Path], bins:
     ax.set_ylabel("Count")
     ax.set_title("Sequence Length Distribution")
     fig.tight_layout()
-    out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
+    out_path = save_plot(fig, str(out_path))
     plt.close(fig)
     return out_path
 
@@ -155,6 +199,6 @@ def plot_gc_boxplot(records: List[Dict], out_path: Union[str, Path]) -> Path:
     ax.set_ylabel("GC%")
     ax.set_title("GC% distribution")
     fig.tight_layout()
-    out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
+    out_path = save_plot(fig, str(out_path))
     plt.close(fig)
     return out_path
