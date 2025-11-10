@@ -32,20 +32,26 @@ def _ensure_plot_dir(base_output: Optional[str] = None, subdir: str = "example_s
     __import__("os").makedirs(plot_dir, exist_ok=True)
     return plot_dir
 
+
+
 def save_plot(fig, filename: str, base_output: Optional[str] = None):
     """
     Save a matplotlib figure.
-    Behavior:
-      * absolute path -> save exactly there
-      * relative path with no dir (e.g. 'len.png') -> save under _ensure_plot_dir(...)
-      * relative path with dir component (e.g. 'example_summary_plots/len.png'):
-          - if the first path component already looks like the base (results or BIOSEQ_OUTPUT_DIR),
-            treat it as relative-to-repo and save (preserves previous behavior)
-          - otherwise, place it under the controlled plots dir produced by _ensure_plot_dir(...)
-    Returns the full path to saved file.
+
+    Rules:
+      - Absolute path -> save exactly there (create parents).
+      - Relative path:
+          * if it begins with the plots-subdir (example_summary_plots), strip that
+            and place the remainder under the controlled plots dir returned by
+            _ensure_plot_dir(base_output) so we do NOT duplicate the subdir.
+          * otherwise, place the relative path under the controlled plots dir,
+            preserving subdirectories.
+    Returns the full path to the saved file.
     """
     import os
-    # Absolute path -> save there
+    subdir = "example_summary_plots"
+
+    # absolute path: respect it exactly
     if os.path.isabs(filename):
         full = os.path.abspath(filename)
         parent = os.path.dirname(full)
@@ -54,40 +60,28 @@ def save_plot(fig, filename: str, base_output: Optional[str] = None):
         fig.savefig(full, bbox_inches="tight")
         return full
 
-    # If filename contains a directory component
-    if os.path.sep in filename:
-        # first path component
-        first = filename.split(os.path.sep, 1)[0]
-        # derive canonical base name (if BIOSEQ_OUTPUT_DIR set, use its basename)
-        base_output_env = os.environ.get("BIOSEQ_OUTPUT_DIR")
-        base_names = {"results"}
-        if base_output_env:
-            base_names.add(os.path.basename(base_output_env.rstrip(os.path.sep)))
-        # If the user already passed something beginning with the base (e.g. 'results/...'),
-        # treat it as a repo-relative path and save exactly where it resolves to.
-        if first in base_names:
-            full = os.path.abspath(filename)
-            parent = os.path.dirname(full)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            fig.savefig(full, bbox_inches="tight")
-            return full
-        # Otherwise, interpret the path as relative to the controlled plots dir
-        out_dir = _ensure_plot_dir(base_output)
-        path = os.path.join(out_dir, filename)
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        fig.savefig(path, bbox_inches="tight")
-        return path
+    # relative path: normalize and sanitize
+    rel = os.path.normpath(filename)
 
-    # No directory component -> normal controlled plots dir
-    out_dir = _ensure_plot_dir(base_output)
-    path = os.path.join(out_dir, filename)
-    fig.savefig(path, bbox_inches="tight")
-    return path
+    # avoid writing outside of plots dir (no leading ..)
+    if rel.startswith(os.pardir + os.sep):
+        # fallback: use basename
+        rel = os.path.basename(rel)
 
+    # if the relative path already begins with the subdir, strip that component
+    # so we don't create results/example_summary_plots/example_summary_plots/...
+    comps = rel.split(os.path.sep)
+    if comps and comps[0] == subdir:
+        comps = comps[1:]
+        rel = os.path.join(*comps) if comps else os.path.basename(filename)
 
+    out_dir = _ensure_plot_dir(base_output, subdir=subdir)
+    full = os.path.join(out_dir, rel)
+    parent = os.path.dirname(full)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    fig.savefig(full, bbox_inches="tight")
+    return full
 
 def _ensure_dir(path: Union[str, Path]):
     p = Path(path)
