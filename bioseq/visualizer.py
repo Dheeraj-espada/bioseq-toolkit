@@ -16,6 +16,33 @@ import csv
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from typing import Optional
+
+def _ensure_plot_dir(base_output: Optional[str] = None, subdir: str = "example_summary_plots") -> str:
+    """
+    Ensure plots directory exists and return full path.
+    Priority:
+      1. base_output argument
+      2. BIOSEQ_OUTPUT_DIR environment variable
+      3. default "results"
+    Final path returned: <base>/<subdir>
+    """
+    base = base_output or __import__("os").environ.get("BIOSEQ_OUTPUT_DIR") or "results"
+    plot_dir = __import__("os").path.join(base, subdir)
+    __import__("os").makedirs(plot_dir, exist_ok=True)
+    return plot_dir
+
+def save_plot(fig, filename: str, base_output: Optional[str] = None):
+    """
+    Save a matplotlib figure into the controlled plots directory.
+    Returns the full path to the saved file.
+    """
+    import os
+    out_dir = _ensure_plot_dir(base_output)
+    path = os.path.join(out_dir, filename)
+    fig.savefig(path, bbox_inches="tight")
+    return path
+
 
 
 def _ensure_dir(path: Union[str, Path]):
@@ -61,7 +88,7 @@ def plot_length_histogram(records: List[Dict], out_path: Union[str, Path], bins:
         # create an empty figure to keep behavior deterministic for tests
         fig = plt.figure()
         fig.suptitle("No length data")
-        fig.savefig(str(out_path))
+        out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
         plt.close(fig)
         return out_path
 
@@ -72,7 +99,7 @@ def plot_length_histogram(records: List[Dict], out_path: Union[str, Path], bins:
     ax.set_ylabel("Count")
     ax.set_title("Sequence Length Distribution")
     fig.tight_layout()
-    fig.savefig(str(out_path))
+    out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
     plt.close(fig)
     return out_path
 
@@ -128,6 +155,6 @@ def plot_gc_boxplot(records: List[Dict], out_path: Union[str, Path]) -> Path:
     ax.set_ylabel("GC%")
     ax.set_title("GC% distribution")
     fig.tight_layout()
-    fig.savefig(str(out_path))
+    out_path = save_plot(fig, __import__("os").path.basename(str(out_path)))
     plt.close(fig)
     return out_path
