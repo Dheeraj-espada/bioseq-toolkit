@@ -58,3 +58,8 @@ Dheeraj Babu — aspiring Bioinformatician
 GitHub: https://github.com/Dheeraj-espada
 
 LinkedIn: https://www.linkedin.com/in/dheeraj-babu-m-74b787219/
+
+## Output directories
+
+- Plots are written under: \$BIOSEQ_OUTPUT_DIR/example_summary_plots (defaults to ./results/example_summary_plots)
+- You can override with BIOSEQ_OUTPUT_DIR or pass absolute paths to save_plot functions.
