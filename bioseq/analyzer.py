@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 bioseq/analyzer.py
-Enhanced FASTA analyzer with ORF finder, partial-ORF support, ORF FASTA output,
+
+Enhanced FASTA/GenBank analyzer with ORF finder, partial-ORF support, ORF FASTA output,
 and optional plotting integration (uses bioseq.visualizer in-process).
 
-Notes:
-- Avoids importing __version__ at module import time to prevent circular imports
-  when this module is executed with `python -m bioseq.analyzer`.
-- Lazy-imports __version__ inside main().
-- Ensures logfile is touched and emits a startup log message so tests can detect it.
+This version adds support for GenBank input files (.gb/.gbk/.genbank) in addition to
+FASTA (.fa/.fasta/.fna) and attempts to auto-detect format when extension is ambiguous.
+
+Additionally provides a helper `read_sequences(path, fmt=None)` for tests and callers.
 """
 import argparse
 import csv
@@ -28,6 +28,54 @@ from . import visualizer as _visualizer
 # constants
 STOPS = {"TAA", "TAG", "TGA"}
 START = "ATG"
+
+
+# ---------------------------
+# Format detection
+# ---------------------------
+def guess_seqio_format(path: Path) -> str:
+    """
+    Guess SeqIO format for the given input path.
+    Priority:
+      1. File extension mapping
+      2. Heuristic peek at first non-empty line
+      3. Default to 'fasta'
+    """
+    ext = path.suffix.lower()
+    if ext in {".gb", ".gbk", ".genbank"}:
+        return "genbank"
+    if ext in {".fa", ".fasta", ".fna", ".ffn"}:
+        return "fasta"
+
+    # Fallback: peek inside file
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(">"):
+                    return "fasta"
+                # GenBank files commonly start with LOCUS or have 'ACCESSION' lines early
+                if line.startswith("LOCUS") or line.startswith("ACCESSION") or line.startswith("DEFINITION"):
+                    return "genbank"
+                # if first meaningful line looks like a FASTA header -> fasta
+                break
+    except Exception:
+        # ignore and fallback
+        pass
+    return "fasta"
+
+
+def read_sequences(path: str, fmt: Optional[str] = None) -> List:
+    """
+    Read sequences from a file and return a list of Bio.SeqRecord objects.
+    - If fmt is None, uses guess_seqio_format to detect 'fasta' or 'genbank'.
+    - Accepts path as str or Path-like.
+    """
+    p = Path(path)
+    fmt_used = fmt or guess_seqio_format(p)
+    return list(SeqIO.parse(str(p), fmt_used))
 
 
 # ---------------------------
@@ -135,7 +183,7 @@ class SequenceRecord:
                 "end_nt_1based": orf["end_nt"],
                 "aa_len": orf["aa_len"],
                 "prot_seq": orf["prot_seq"],
-                "partial": orf.get("partial", False)
+                "partial": False
             })
         # reverse strand
         if both_strands:
@@ -188,7 +236,7 @@ def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_p
     aa_counts = ""
 
     if use_orf:
-        orf_info = find_longest_orf(seq_rec.seq, both_strands=both_strands, allow_partial=allow_partial)
+        orf_info = seq_rec.longest_orf(both_strands=both_strands, allow_partial=allow_partial)
         if orf_info and orf_info["aa_len"] >= min_orf_aa:
             prot_seq = orf_info["prot_seq"]
             prot_len = orf_info["aa_len"]
@@ -241,7 +289,7 @@ def analyze_record(rec, use_orf=False, both_strands=False, min_orf_aa=0, allow_p
 
     return {
         "id": rec.id,
-        "description": rec.description,
+        "description": getattr(rec, "description", ""),
         "length": seq_len,
         "gc_percent": round(gc, 2),
         "rev_comp_first50": rev_comp_first50,
@@ -286,9 +334,9 @@ def main():
     # lazy import of __version__ avoids circular import when invoked with -m
     from bioseq import __version__
 
-    parser = argparse.ArgumentParser(description="Enhanced FASTA analyzer with ORF finder and optional plotting")
+    parser = argparse.ArgumentParser(description="Enhanced FASTA/GenBank analyzer with ORF finder and optional plotting")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("in_fasta", type=Path, help="Input FASTA file")
+    parser.add_argument("in_path", type=Path, help="Input sequence file (FASTA: .fa/.fasta/.fna or GenBank: .gb/.gbk/.genbank)")
     parser.add_argument("-o", "--out_csv", type=Path, default=Path("enhanced_summary.csv"), help="Output CSV file")
     parser.add_argument("--orf", action="store_true", help="Find longest ORF (ATG..stop) across frames")
     parser.add_argument("--both-strands", action="store_true", help="When using --orf, search both forward and reverse strands")
@@ -308,10 +356,7 @@ def main():
 
     args = parser.parse_args()
 
-    # configure logging (works with --verbose, --quiet, and --logfile)
-    # configure logging so:
-    # - console (stdout) shows INFO/DEBUG/WARNING per args.verbose/args.quiet
-    # - logfile (if requested) always receives DEBUG and above
+    # configure logging
     log_level = logging.DEBUG if args.verbose else (logging.WARNING if args.quiet else logging.INFO)
 
     root_logger = logging.getLogger()
@@ -326,43 +371,36 @@ def main():
     root_logger.addHandler(console_handler)
 
     if args.logfile:
-        # ensure parent dir exists and the file is created
         args.logfile.parent.mkdir(parents=True, exist_ok=True)
-
-        # touch the file (create if missing)
         try:
             args.logfile.touch(exist_ok=True)
         except Exception:
             with open(args.logfile, "a"):
                 pass
-
-        # write a startup line directly to the file so it is non-empty even if logging handlers
-        # behave differently in CI subprocess environments
         try:
             with open(args.logfile, "a", encoding="utf-8") as _fh:
                 _fh.write("BioSeq Analyzer started.\n")
         except Exception:
-            # fallback - ignore write errors (file may be readonly in some edge cases)
             pass
-
-        # now attach a file handler so future log messages go there as well
         file_handler = logging.FileHandler(args.logfile)
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         root_logger.addHandler(file_handler)
-
-        # ensure root logger is DEBUG so file handler collects everything
         root_logger.setLevel(logging.DEBUG)
 
-    # emit a startup message (this will be written to logfile even when --quiet)
     logging.info("BioSeq Analyzer started.")
+
+    # determine SeqIO format (fasta/genbank)
+    seqio_format = guess_seqio_format(args.in_path)
+    logging.info(f"Detected/using SeqIO format: {seqio_format}")
 
     seq_map = None
     orf_nuc_fh = None
     orf_aa_fh = None
     if args.write_orf_fasta:
-        logging.info("Loading FASTA into memory for ORF FASTA output (mem mode).")
-        seq_map = {rec.id: rec for rec in SeqIO.parse(str(args.in_fasta), "fasta")}
+        logging.info("Loading input into memory for ORF FASTA output (mem mode).")
+        # use same detected format to load the sequences
+        seq_map = {rec.id: rec for rec in SeqIO.parse(str(args.in_path), seqio_format)}
         prefix = args.out_csv.stem
         orf_nuc_path = Path(f"{prefix}_orfs.nuc.fa")
         orf_aa_path = Path(f"{prefix}_orfs.aa.fa")
@@ -371,7 +409,7 @@ def main():
         logging.info(f"ORF nucleotide FASTA will be written to: {orf_nuc_path}")
         logging.info(f"ORF amino-acid FASTA will be written to: {orf_aa_path}")
 
-    records = SeqIO.parse(str(args.in_fasta), "fasta")
+    records = SeqIO.parse(str(args.in_path), seqio_format)
     written = 0
     skipped_length = 0
     skipped_prot = 0
@@ -414,7 +452,7 @@ def main():
                 sid = res["id"]
                 seq_obj = seq_map.get(sid)
                 if seq_obj is None:
-                    logging.warning(f"Sequence {sid} not found in in-memory FASTA (unexpected).")
+                    logging.warning(f"Sequence {sid} not found in in-memory input (unexpected).")
                 else:
                     start = int(res["orf_start"])
                     end = int(res["orf_end"])
@@ -451,4 +489,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
