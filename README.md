@@ -63,3 +63,9 @@ LinkedIn: https://www.linkedin.com/in/dheeraj-babu-m-74b787219/
 
 - Plots are written under: \$BIOSEQ_OUTPUT_DIR/example_summary_plots (defaults to ./results/example_summary_plots)
 - You can override with BIOSEQ_OUTPUT_DIR or pass absolute paths to save_plot functions.
+
+### Install from GitHub release (recommended)
+pip install https://github.com/Dheeraj-espada/bioseq-toolkit/releases/download/v0.1.1/bioseq_toolkit-0.1.1-py3-none-any.whl
+
+### Install from source (latest)
+pip install git+https://github.com/Dheeraj-espada/bioseq-toolkit.git@main
